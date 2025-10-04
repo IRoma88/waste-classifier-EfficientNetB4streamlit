@@ -11,51 +11,71 @@ MODEL_PATH = "EfficientNetB4_finetuned.keras"
 # --- DESCARGAR MODELO ---
 @st.cache_resource
 def download_model():
-    # Eliminar archivo corrupto si existe y es muy pequeño
-    if os.path.exists(MODEL_PATH) and os.path.getsize(MODEL_PATH) < 10000:  # Menos de 10KB = corrupto
+    # Eliminar archivo corrupto si existe
+    if os.path.exists(MODEL_PATH) and os.path.getsize(MODEL_PATH) < 10000:
         os.remove(MODEL_PATH)
-        st.info("🗑️ Archivo corrupto eliminado, descargando nuevo...")
     
     if not os.path.exists(MODEL_PATH):
+        st.info("📥 Descargando modelo... Esto puede tomar unos minutos para un modelo grande.")
+        
         try:
-            st.info("📥 Descargando modelo desde Google Drive...")
-            
-            # URL de Google Drive (asegúrate de que el archivo sea público)
+            # Tu enlace público de Google Drive
             file_id = "1xlzVWU680kSKIpJGl6i0mgTdct4QE_La"
-            url = f"https://drive.google.com/uc?id={file_id}"
             
-            # Descargar usando gdown con force download
-            gdown.download(url, MODEL_PATH, quiet=False, fuzzy=True)
+            # URL para descarga directa (formato correcto)
+            download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
             
-            # Verificar descarga
+            st.write("🔗 Usando enlace público de Google Drive...")
+            
+            # Método 1: Gdown con el file_id
+            gdown.download(f"https://drive.google.com/uc?id={file_id}", MODEL_PATH, quiet=False)
+            
+            # Verificar si la descarga fue exitosa
             if os.path.exists(MODEL_PATH):
                 file_size = os.path.getsize(MODEL_PATH)
-                st.info(f"📊 Tamaño del archivo descargado: {file_size} bytes")
+                st.write(f"📊 Tamaño descargado: {file_size} bytes")
                 
                 if file_size > 100000:  # Más de 100KB = probablemente válido
-                    st.success("✅ Modelo descargado exitosamente")
+                    st.success("✅ Modelo descargado exitosamente!")
                     return True
                 else:
-                    st.error(f"❌ Archivo demasiado pequeño ({file_size} bytes), probablemente no es un modelo válido")
+                    st.warning("⚠️ Archivo muy pequeño, intentando método alternativo...")
+                    os.remove(MODEL_PATH)
+                    
+                    # Método alternativo: requests
+                    response = requests.get(download_url, stream=True)
+                    total_size = int(response.headers.get('content-length', 0))
+                    
+                    if total_size > 100000:
+                        with open(MODEL_PATH, 'wb') as f:
+                            for chunk in response.iter_content(chunk_size=8192):
+                                if chunk:
+                                    f.write(chunk)
+                        
+                        if os.path.getsize(MODEL_PATH) > 100000:
+                            st.success("✅ Modelo descargado con método alternativo!")
+                            return True
+                    
+                    st.error("❌ El archivo descargado es demasiado pequeño")
                     return False
             else:
-                st.error("❌ No se pudo descargar el modelo")
+                st.error("❌ No se pudo crear el archivo del modelo")
                 return False
                 
         except Exception as e:
-            st.error(f"❌ Error descargando el modelo: {e}")
+            st.error(f"❌ Error en la descarga: {e}")
             return False
     else:
         file_size = os.path.getsize(MODEL_PATH)
         if file_size > 100000:
-            st.success(f"✅ Modelo ya existe ({file_size} bytes)")
+            st.success(f"✅ Modelo ya disponible ({file_size} bytes)")
             return True
         else:
-            st.warning(f"⚠️ Archivo existente muy pequeño ({file_size} bytes), reintentando descarga...")
+            st.warning("⚠️ Archivo existente corrupto, reintentando descarga...")
             os.remove(MODEL_PATH)
             return download_model()
 
-# Descargar modelo
+# Ejecutar descarga
 download_success = download_model()
 
 CLASS_NAMES = [
@@ -88,26 +108,31 @@ def load_model():
             return None
             
         file_size = os.path.getsize(MODEL_PATH)
-        st.info(f"📊 Verificando modelo: {file_size} bytes")
+        st.info(f"📊 Cargando modelo: {file_size} bytes")
         
-        if file_size < 100000:  # Menos de 100KB = no es un modelo válido
-            st.error(f"❌ El archivo del modelo es demasiado pequeño ({file_size} bytes). Debe ser > 100MB aproximadamente.")
+        if file_size < 100000:
+            st.error(f"❌ El archivo es demasiado pequeño para ser un modelo ({file_size} bytes)")
             return None
             
-        # Intentar cargar el modelo
-        with st.spinner("🔄 Cargando modelo en memoria..."):
+        # Mostrar progreso de carga
+        with st.spinner("🔄 Cargando modelo en memoria (esto puede tomar unos segundos)..."):
             model = tf.keras.models.load_model(MODEL_PATH)
             
-        st.success("✅ Modelo cargado exitosamente")
+        st.success("✅ ¡Modelo cargado exitosamente!")
         return model
         
     except Exception as e:
         st.error(f"❌ Error cargando el modelo: {str(e)}")
-        # Mostrar más detalles del error
-        st.info("💡 Posibles soluciones:")
-        st.info("1. Verifica que el archivo en Google Drive sea público")
-        st.info("2. Asegúrate de que sea un modelo .keras válido")
-        st.info("3. Revisa que las versiones de TensorFlow coincidan")
+        
+        # Información de diagnóstico
+        with st.expander("🔍 Detalles técnicos del error"):
+            st.write(f"**Tipo de error:** {type(e).__name__}")
+            st.write(f"**Mensaje:** {str(e)}")
+            st.write("**Posibles causas:**")
+            st.write("- Versiones incompatibles de TensorFlow")
+            st.write("- Archivo de modelo corrupto")
+            st.write("- Formato de archivo incorrecto")
+        
         return None
 
 model = load_model()
@@ -124,47 +149,75 @@ def predict(img_array):
         return "Modelo no disponible", 0.0
     
     try:
-        preds = model.predict(img_array)
+        with st.spinner("🔍 Analizando imagen..."):
+            preds = model.predict(img_array)
         class_id = np.argmax(preds, axis=1)[0]
         confidence = float(np.max(preds))
         return CLASS_NAMES[class_id], confidence
     except Exception as e:
         return f"Error en predicción: {str(e)}", 0.0
 
-# --- INTERFAZ ---
-st.title("♻️ Clasificador de Residuos/Waste Classifier - EfficientNetB4")
-st.write("Sube una imagen y el modelo te dirá a qué categoría pertenece.")
+# --- INTERFAZ PRINCIPAL ---
+st.title("♻️ Clasificador de Residuos - EfficientNetB4")
+st.write("Sube una imagen de un residuo y el modelo te dirá en qué categoría clasificarlo")
 
-# Estado de la aplicación
-st.sidebar.header("Estado del Sistema")
-if model is not None:
-    st.sidebar.success("✅ Modelo listo")
-else:
-    st.sidebar.error("❌ Modelo no disponible")
-
-if model is None:
-    st.error("⚠️ El modelo no está disponible para clasificación.")
-    
-    # Información de diagnóstico
-    with st.expander("🔧 Diagnóstico y Soluciones"):
-        st.write("**Problema detectado:** El modelo no se descargó/cargó correctamente")
-        st.write("**Soluciones:**")
-        st.write("1. **Verificar permisos de Google Drive**: Asegúrate de que el archivo sea público")
-        st.write("2. **Tamaño esperado**: Un modelo EfficientNetB4 debería tener >100MB")
-        st.write("3. **Formato del modelo**: Verifica que sea un archivo .keras válido")
+# Estado del sistema
+col1, col2 = st.columns(2)
+with col1:
+    if download_success:
+        st.success("📥 Descarga: OK")
+    else:
+        st.error("📥 Descarga: Falló")
         
-        if st.button("🔄 Reintentar Carga Completa"):
-            # Limpiar cache y reintentar
-            st.cache_resource.clear()
-            st.rerun()
+with col2:
+    if model is not None:
+        st.success("🧠 Modelo: Cargado")
+    else:
+        st.error("🧠 Modelo: No disponible")
 
-uploaded_file = st.file_uploader("Sube una imagen/Upload an image", type=["jpg","jpeg","png","webp"])
-
-if uploaded_file and model is not None:
-    img_array, img_disp = preprocess_image(uploaded_file)
-    st.image(img_disp, caption="Imagen subida/Image uploaded", use_column_width=True)
-
-    with st.spinner("Clasificando..."):
+# Solo mostrar el uploader si el modelo está cargado
+if model is not None:
+    uploaded_file = st.file_uploader(
+        "Sube una imagen de residuo", 
+        type=["jpg", "jpeg", "png", "webp"],
+        help="Sube una imagen clara del residuo que quieres clasificar"
+    )
+    
+    if uploaded_file is not None:
+        # Preprocesar y mostrar imagen
+        img_array, img_disp = preprocess_image(uploaded_file)
+        st.image(img_disp, caption="📷 Imagen subida", use_column_width=True)
+        
+        # Realizar predicción
         pred_class, conf = predict(img_array)
+        
+        # Mostrar resultados
+        st.success(f"✅ **Categoría:** {pred_class}")
+        
+        # Barra de confianza
+        st.progress(conf)
+        st.write(f"**Confianza:** {conf*100:.2f}%")
+        
+        # Información adicional sobre la categoría
+        if "BlueRecyclable" in pred_class:
+            st.info("🔵 **Contenedor Azul - Reciclable**")
+        elif "BrownCompost" in pred_class:
+            st.info("🟤 **Contenedor Marrón - Orgánico**")
+        elif "GrayTrash" in pred_class:
+            st.info("⚪ **Contenedor Gris - Resto**")
+        elif "SPECIAL" in pred_class:
+            st.warning("🟡 **Categoría Especial - Sigue instrucciones específicas**")
 
-    st.success(f"✅ Predicción: **{pred_class}** ({conf*100:.2f}%)")
+else:
+    st.error("""
+    ❌ **El sistema no está listo todavía**
+    
+    Si el problema persiste:
+    1. Verifica que el archivo en Google Drive sea mayor a 100MB
+    2. Espera unos minutos y recarga la aplicación
+    3. Contacta al administrador si necesitas ayuda
+    """)
+
+# Footer
+st.markdown("---")
+st.caption("Clasificador de Residuos usando EfficientNetB4 - Versión Streamlit")

@@ -65,9 +65,9 @@ CLASS_NAMES = [
     "SPECIAL_HHW"
 ]
 
-IMG_SIZE = (380, 380)  # EfficientNetB4 usa 380x380
+IMG_SIZE = (380, 380)
 
-# --- CARGA DE MODELO ---
+# --- CARGA DE MODELO CON COMPATIBILIDAD ---
 @st.cache_resource
 def load_model():
     if not download_success:
@@ -80,19 +80,65 @@ def load_model():
         if file_size < 100000:
             return None
             
-        with st.spinner("🔄 Cargando modelo en memoria..."):
-            model = tf.keras.models.load_model(MODEL_PATH)
+        with st.spinner("🔄 Cargando modelo (puede tomar unos segundos)..."):
+            # Intentar diferentes métodos de carga para compatibilidad
+            try:
+                # Método 1: Carga normal
+                model = tf.keras.models.load_model(MODEL_PATH)
+                st.success("✅ ¡Modelo cargado con método estándar!")
+            except Exception as e1:
+                st.warning("⚠️ Método estándar falló, intentando con custom_objects...")
+                try:
+                    # Método 2: Con compatibilidad
+                    model = tf.keras.models.load_model(
+                        MODEL_PATH,
+                        compile=False,
+                        custom_objects={
+                            'Functional': tf.keras.Model,
+                            'Adam': tf.keras.optimizers.Adam
+                        }
+                    )
+                    # Compilar el modelo si es necesario
+                    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+                    st.success("✅ ¡Modelo cargado con compatibilidad!")
+                except Exception as e2:
+                    st.warning("⚠️ Segundo método falló, intentando carga básica...")
+                    try:
+                        # Método 3: Solo cargar pesos o arquitectura básica
+                        model = tf.keras.models.load_model(
+                            MODEL_PATH,
+                            compile=False
+                        )
+                        st.success("✅ ¡Modelo cargado en modo básico!")
+                    except Exception as e3:
+                        st.error(f"❌ Todos los métodos fallaron:")
+                        st.error(f"Error 1: {str(e1)}")
+                        st.error(f"Error 2: {str(e2)}")
+                        st.error(f"Error 3: {str(e3)}")
+                        return None
+        
+        # Verificar que el modelo se cargó correctamente
+        if model is not None:
+            st.success(f"✅ Modelo cargado: {type(model)}")
+            # Probar una predicción simple para verificar
+            try:
+                test_input = np.random.random((1, 380, 380, 3)).astype(np.float32)
+                test_pred = model.predict(test_input)
+                st.success(f"✅ Modelo verificado: Output shape {test_pred.shape}")
+            except Exception as e:
+                st.warning(f"⚠️ Modelo cargado pero falló en prueba: {e}")
             
-        st.success("✅ ¡Modelo cargado exitosamente!")
-        return model
+            return model
+        else:
+            return None
         
     except Exception as e:
-        st.error(f"❌ Error cargando el modelo: {str(e)}")
+        st.error(f"❌ Error general cargando el modelo: {str(e)}")
         return None
 
 model = load_model()
 
-# --- FUNCIONES CORREGIDAS ---
+# --- FUNCIONES ---
 def preprocess_image(uploaded_file):
     """Preprocesa la imagen asegurando que tenga 3 canales (RGB)"""
     try:
@@ -118,28 +164,6 @@ def preprocess_image(uploaded_file):
         st.error(f"Error procesando imagen: {e}")
         return None, None
 
-def preprocess_image_alternative(uploaded_file):
-    """Método alternativo usando tensorflow"""
-    try:
-        # Leer el archivo
-        img_bytes = uploaded_file.read()
-        
-        # Decodificar la imagen
-        img = tf.image.decode_image(img_bytes, channels=3)  # Forzar 3 canales
-        img = tf.image.resize(img, IMG_SIZE)
-        img = img / 255.0
-        img = tf.expand_dims(img, axis=0)
-        
-        # Convertir a numpy array para mostrar
-        img_display = Image.open(uploaded_file)
-        uploaded_file.seek(0)  # Reset file pointer
-        
-        return img.numpy(), img_display
-        
-    except Exception as e:
-        st.error(f"Error en método alternativo: {e}")
-        return None, None
-
 def predict(img_array):
     if model is None:
         return "Modelo no disponible", 0.0
@@ -163,7 +187,7 @@ def predict(img_array):
     except Exception as e:
         return f"Error en predicción: {str(e)}", 0.0
 
-# --- INTERFAZ MEJORADA ---
+# --- INTERFAZ ---
 st.title("♻️ Clasificador de Residuos - EfficientNetB4")
 st.write("Sube una imagen de un residuo y el modelo te dirá en qué categoría clasificarlo")
 
@@ -202,22 +226,11 @@ if model is not None:
     )
     
     if uploaded_file is not None:
-        # Mostrar información del archivo
-        file_details = {
-            "Nombre": uploaded_file.name,
-            "Tipo": uploaded_file.type,
-            "Tamaño": f"{uploaded_file.size} bytes"
-        }
-        st.write("📄 **Información del archivo:**", file_details)
-        
         # Preprocesar y mostrar imagen
         img_array, img_disp = preprocess_image(uploaded_file)
         
         if img_array is not None:
             st.image(img_disp, caption="📷 Imagen subida (convertida a RGB)", use_column_width=True)
-            
-            # Mostrar información de la imagen procesada
-            st.write(f"🔍 **Imagen procesada:** {img_array.shape[1]}x{img_array.shape[2]} con {img_array.shape[3]} canales")
             
             # Realizar predicción
             pred_class, conf = predict(img_array)
@@ -234,29 +247,38 @@ if model is not None:
                 st.markdown("---")
                 if "BlueRecyclable" in pred_class:
                     st.info("🔵 **Contenedor Azul - Reciclable**")
-                    st.write("Materiales como papel, cartón, vidrio, metales y plásticos")
                 elif "BrownCompost" in pred_class:
                     st.info("🟤 **Contenedor Marrón - Orgánico**")
-                    st.write("Restos de comida, frutas, verduras, poda del jardín")
                 elif "GrayTrash" in pred_class:
                     st.info("⚪ **Contenedor Gris - Resto**")
-                    st.write("Materiales no reciclables ni compostables")
                 elif "SPECIAL" in pred_class:
                     st.warning("🟡 **Categoría Especial**")
-                    st.write("Sigue las instrucciones específicas de tu municipio para este tipo de residuos")
             else:
                 st.error(pred_class)
-        else:
-            st.error("❌ No se pudo procesar la imagen correctamente")
 
 else:
     st.error("""
     ❌ **El sistema no está listo todavía**
     
-    Si el problema persiste después de recargar:
-    1. Verifica que el modelo sea compatible con TensorFlow 2.13.0
-    2. Contacta al administrador del sistema
+    **Posibles soluciones:**
+    1. **Recarga la página** (F5 o Ctrl+R)
+    2. **Verifica el requirements.txt** en tu repositorio
+    3. **El modelo puede necesitar ser reentrenado** con una versión compatible
+    
+    **Para futuros entrenamientos en Colab:**
+    ```python
+    # Al final de tu notebook, guarda el modelo así:
+    model.save('modelo.h5')  # Formato .h5 es más compatible
+    # O especifica la versión de TensorFlow
+    !pip install tensorflow==2.13.0
+    ```
     """)
+
+# Información de versión
+st.sidebar.markdown("---")
+st.sidebar.write("**Versiones:**")
+st.sidebar.write(f"TensorFlow: {tf.__version__}")
+st.sidebar.write(f"Streamlit: {st.__version__}")
 
 # Footer
 st.markdown("---")

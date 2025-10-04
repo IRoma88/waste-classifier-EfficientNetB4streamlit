@@ -3,9 +3,13 @@ import tensorflow as tf
 from tensorflow.keras.preprocessing import image
 import numpy as np
 import os
+import gdown, os
 
-# --- CONFIGURACIÓN ---
 MODEL_PATH = "EfficientNetB4_finetuned.keras"
+
+if not os.path.exists(MODEL_PATH):
+    url = "https://drive.google.com/ProyectoBasuras/EfficientNetB4_finetuned.keras"
+    gdown.download(url, MODEL_PATH, quiet=False)
 
 # Ajusta según tus clases finales (en el mismo orden que usaste en entrenamiento)
 CLASS_NAMES = [

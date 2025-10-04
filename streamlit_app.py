@@ -3,7 +3,7 @@ import tensorflow as tf
 from tensorflow.keras.preprocessing import image
 import numpy as np
 import os
-import gdown, os
+import gdown
 
 MODEL_PATH = "EfficientNetB4_finetuned.keras"
 

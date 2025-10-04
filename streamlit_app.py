@@ -4,17 +4,38 @@ from tensorflow.keras.preprocessing import image
 import numpy as np
 import os
 import gdown
+import requests
 
 MODEL_PATH = "EfficientNetB4_finetuned.keras"
 
-# Descargar modelo si no existe
-if not os.path.exists(MODEL_PATH):
-    try:
-        url = "https://drive.google.com/uc?id=1xlzVWU680kSKIpJGl6i0mgTdct4QE_La"
-        gdown.download(url, MODEL_PATH, quiet=False)
-        st.success("Modelo descargado exitosamente")
-    except Exception as e:
-        st.error(f"Error descargando el modelo: {e}")
+# --- DESCARGAR MODELO ---
+@st.cache_resource
+def download_model():
+    if not os.path.exists(MODEL_PATH):
+        try:
+            st.info("📥 Descargando modelo... Esto puede tomar unos minutos.")
+            url = "https://drive.google.com/uc?id=1xlzVWU680kSKIpJGl6i0mgTdct4QE_La"
+            
+            # Método alternativo si gdown falla
+            gdown.download(url, MODEL_PATH, quiet=False)
+            
+            # Verificar que el archivo se descargó correctamente
+            if os.path.exists(MODEL_PATH) and os.path.getsize(MODEL_PATH) > 0:
+                st.success("✅ Modelo descargado exitosamente")
+                return True
+            else:
+                st.error("❌ El archivo del modelo está vacío o no se descargó correctamente")
+                return False
+                
+        except Exception as e:
+            st.error(f"❌ Error descargando el modelo: {e}")
+            return False
+    else:
+        st.success("✅ Modelo ya existe localmente")
+        return True
+
+# Descargar modelo al inicio
+download_success = download_model()
 
 CLASS_NAMES = [
     "BlueRecyclable_Cardboard",
@@ -35,17 +56,37 @@ IMG_SIZE = (380, 380)
 # --- CARGA DE MODELO ---
 @st.cache_resource
 def load_model():
+    if not download_success:
+        st.error("No se pudo descargar el modelo")
+        return None
+        
     try:
-        # Intentar cargar con diferentes opciones
-        model = tf.keras.models.load_model(
-            MODEL_PATH,
-            compile=False  # Intentar sin compilar primero
-        )
-        # Si necesitas compilarlo después:
+        # Verificar que el archivo existe y tiene tamaño
+        if not os.path.exists(MODEL_PATH):
+            st.error(f"Archivo {MODEL_PATH} no encontrado")
+            return None
+            
+        file_size = os.path.getsize(MODEL_PATH)
+        st.info(f"Tamaño del archivo del modelo: {file_size} bytes")
+        
+        if file_size == 0:
+            st.error("El archivo del modelo está vacío")
+            return None
+            
+        # Intentar cargar el modelo
+        with st.spinner("🔄 Cargando modelo..."):
+            model = tf.keras.models.load_model(
+                MODEL_PATH,
+                compile=False
+            )
+            
+        # Compilar el modelo si es necesario
         model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+        st.success("✅ Modelo cargado exitosamente")
         return model
+        
     except Exception as e:
-        st.error(f"Error cargando el modelo: {e}")
+        st.error(f"❌ Error cargando el modelo: {str(e)}")
         return None
 
 model = load_model()
@@ -61,19 +102,28 @@ def predict(img_array):
     if model is None:
         return "Modelo no disponible", 0.0
     
-    preds = model.predict(img_array)
-    class_id = np.argmax(preds, axis=1)[0]
-    confidence = float(np.max(preds))
-    return CLASS_NAMES[class_id], confidence
+    try:
+        preds = model.predict(img_array)
+        class_id = np.argmax(preds, axis=1)[0]
+        confidence = float(np.max(preds))
+        return CLASS_NAMES[class_id], confidence
+    except Exception as e:
+        return f"Error en predicción: {str(e)}", 0.0
 
 # --- INTERFAZ ---
 st.title("♻️ Clasificador de Residuos/Waste Classifier - EfficientNetB4")
 st.write("Sube una imagen y el modelo te dirá a qué categoría pertenece./Upload an image and the model will tell you what category it belongs to")
 
+# Mostrar estado del modelo
 if model is None:
-    st.warning("⚠️ El modelo no se pudo cargar. Por favor, revisa los logs.")
+    st.error("⚠️ El modelo no se pudo cargar. Por favor, revisa los logs.")
+    
+    # Botón para reintentar descarga
+    if st.button("Reintentar descarga del modelo"):
+        st.cache_resource.clear()
+        st.experimental_rerun()
 else:
-    st.success("✅ Modelo cargado exitosamente")
+    st.success("✅ Modelo listo para clasificar")
 
 uploaded_file = st.file_uploader("Sube una imagen/Upload an image", type=["jpg","jpeg","png","webp"])
 

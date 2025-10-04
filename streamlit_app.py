@@ -8,7 +8,8 @@ import gdown
 MODEL_PATH = "EfficientNetB4_finetuned.keras"
 
 if not os.path.exists(MODEL_PATH):
-    url = "https://drive.google.com/file/d/1xlzVWU680kSKIpJGl6i0mgTdct4QE_La/view?usp=drive_link"
+    url = "https://drive.google.com/uc?id=1xlzVWU680kSKIpJGl6i0mgTdct4QE_La"
+    import gdown
     gdown.download(url, MODEL_PATH, quiet=False)
 
 # Ajusta según tus clases finales (en el mismo orden que usaste en entrenamiento)

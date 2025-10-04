@@ -20,7 +20,6 @@ def download_model():
         
         try:
             file_id = "1xlzVWU680kSKIpJGl6i0mgTdct4QE_La"
-            download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
             
             st.write("🔗 Usando enlace público de Google Drive...")
             gdown.download(f"https://drive.google.com/uc?id={file_id}", MODEL_PATH, quiet=False)
@@ -67,7 +66,7 @@ CLASS_NAMES = [
 
 IMG_SIZE = (380, 380)
 
-# --- CARGA DE MODELO CON COMPATIBILIDAD ---
+# --- CARGA DE MODELO SIMPLIFICADA ---
 @st.cache_resource
 def load_model():
     if not download_success:
@@ -80,67 +79,46 @@ def load_model():
         if file_size < 100000:
             return None
             
-        with st.spinner("🔄 Cargando modelo (puede tomar unos segundos)..."):
-            # Intentar diferentes métodos de carga para compatibilidad
-            try:
-                # Método 1: Carga normal
-                model = tf.keras.models.load_model(MODEL_PATH)
-                st.success("✅ ¡Modelo cargado con método estándar!")
-            except Exception as e1:
-                st.warning("⚠️ Método estándar falló, intentando con custom_objects...")
-                try:
-                    # Método 2: Con compatibilidad
-                    model = tf.keras.models.load_model(
-                        MODEL_PATH,
-                        compile=False,
-                        custom_objects={
-                            'Functional': tf.keras.Model,
-                            'Adam': tf.keras.optimizers.Adam
-                        }
-                    )
-                    # Compilar el modelo si es necesario
-                    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-                    st.success("✅ ¡Modelo cargado con compatibilidad!")
-                except Exception as e2:
-                    st.warning("⚠️ Segundo método falló, intentando carga básica...")
-                    try:
-                        # Método 3: Solo cargar pesos o arquitectura básica
-                        model = tf.keras.models.load_model(
-                            MODEL_PATH,
-                            compile=False
-                        )
-                        st.success("✅ ¡Modelo cargado en modo básico!")
-                    except Exception as e3:
-                        st.error(f"❌ Todos los métodos fallaron:")
-                        st.error(f"Error 1: {str(e1)}")
-                        st.error(f"Error 2: {str(e2)}")
-                        st.error(f"Error 3: {str(e3)}")
-                        return None
-        
-        # Verificar que el modelo se cargó correctamente
-        if model is not None:
-            st.success(f"✅ Modelo cargado: {type(model)}")
-            # Probar una predicción simple para verificar
-            try:
-                test_input = np.random.random((1, 380, 380, 3)).astype(np.float32)
-                test_pred = model.predict(test_input)
-                st.success(f"✅ Modelo verificado: Output shape {test_pred.shape}")
-            except Exception as e:
-                st.warning(f"⚠️ Modelo cargado pero falló en prueba: {e}")
+        with st.spinner("🔄 Cargando modelo..."):
+            # Carga simple sin pruebas adicionales
+            model = tf.keras.models.load_model(MODEL_PATH, compile=False)
             
-            return model
-        else:
-            return None
+            # Compilar si es necesario
+            model.compile(optimizer='adam', 
+                         loss='categorical_crossentropy', 
+                         metrics=['accuracy'])
+            
+        st.success("✅ ¡Modelo cargado exitosamente!")
+        return model
         
     except Exception as e:
-        st.error(f"❌ Error general cargando el modelo: {str(e)}")
+        st.error(f"❌ Error cargando el modelo: {str(e)}")
+        
+        # Mostrar solución específica
+        st.markdown("""
+        ### 🔧 Solución Requerida:
+        
+        El modelo fue entrenado con una configuración diferente. Necesitas:
+        
+        1. **Volver a Google Colab**
+        2. **Guardar el modelo con esta configuración:**
+        ```python
+        # Guardar con formato compatible
+        model.save('EfficientNetB4_compatible.keras', save_format='keras')
+        
+        # O mejor aún, guardar como .h5
+        model.save('EfficientNetB4_compatible.h5')
+        ```
+        3. **Subir el nuevo modelo a Google Drive**
+        4. **Actualizar el enlace en esta aplicación**
+        """)
         return None
 
 model = load_model()
 
-# --- FUNCIONES ---
+# --- FUNCIONES MEJORADAS ---
 def preprocess_image(uploaded_file):
-    """Preprocesa la imagen asegurando que tenga 3 canales (RGB)"""
+    """Preprocesa la imagen asegurando que tenga 3 canales (RGB) y tamaño correcto"""
     try:
         # Abrir la imagen y convertir a RGB (asegura 3 canales)
         img = Image.open(uploaded_file)
@@ -149,19 +127,24 @@ def preprocess_image(uploaded_file):
         if img.mode != 'RGB':
             img = img.convert('RGB')
         
-        # Redimensionar
+        # Redimensionar al tamaño que espera el modelo (380x380 para EfficientNetB4)
         img = img.resize(IMG_SIZE)
         
         # Convertir a array y normalizar
         img_array = np.array(img) / 255.0
         
+        # Verificar la forma
+        st.write(f"🔍 Imagen procesada: {img_array.shape}")
+        
         # Añadir dimensión del batch
         img_array = np.expand_dims(img_array, axis=0)
+        
+        st.write(f"🔍 Forma final para el modelo: {img_array.shape}")
         
         return img_array, img
         
     except Exception as e:
-        st.error(f"Error procesando imagen: {e}")
+        st.error(f"❌ Error procesando imagen: {e}")
         return None, None
 
 def predict(img_array):
@@ -170,15 +153,25 @@ def predict(img_array):
     
     try:
         # Verificar la forma de la imagen
-        st.write(f"🔍 Forma de la imagen de entrada: {img_array.shape}")
+        st.write(f"🔍 Forma de entrada al modelo: {img_array.shape}")
         
-        # Asegurarse de que la imagen tenga 3 canales
-        if img_array.shape[-1] != 3:
-            st.error(f"❌ La imagen tiene {img_array.shape[-1]} canales, pero se necesitan 3 canales RGB")
-            return "Error: Imagen debe ser RGB", 0.0
+        # Asegurarse de que la imagen tenga la forma correcta: (1, 380, 380, 3)
+        if img_array.shape != (1, 380, 380, 3):
+            st.error(f"❌ Forma incorrecta: {img_array.shape}. Debe ser (1, 380, 380, 3)")
+            # Intentar corregir la forma
+            if len(img_array.shape) == 3:
+                img_array = np.expand_dims(img_array, axis=0)
+            if img_array.shape[1:3] != (380, 380):
+                st.error("❌ Tamaño incorrecto. No se puede corregir automáticamente.")
+                return "Error: Tamaño de imagen incorrecto", 0.0
+            if img_array.shape[-1] != 3:
+                st.error("❌ Número de canales incorrecto. No se puede corregir automáticamente.")
+                return "Error: Imagen debe tener 3 canales RGB", 0.0
         
         with st.spinner("🔍 Analizando imagen..."):
-            preds = model.predict(img_array)
+            preds = model.predict(img_array, verbose=0)
+        
+        st.write(f"🔍 Forma de las predicciones: {preds.shape}")
         
         class_id = np.argmax(preds, axis=1)[0]
         confidence = float(np.max(preds))
@@ -208,21 +201,12 @@ with col2:
 with col3:
     st.info(f"📐 Tamaño: {IMG_SIZE[0]}x{IMG_SIZE[1]}")
 
-# Información para el usuario
-st.info("""
-💡 **Recomendaciones para mejores resultados:**
-- Usa imágenes con buena iluminación
-- Enfoca claramente el objeto
-- Toma la foto sobre fondo neutro
-- Evita imágenes borrosas o oscuras
-""")
-
 # Solo mostrar el uploader si el modelo está cargado
 if model is not None:
     uploaded_file = st.file_uploader(
         "Sube una imagen de residuo", 
         type=["jpg", "jpeg", "png", "webp"],
-        help="Sube una imagen RGB (color) para mejor clasificación"
+        help="Sube una imagen RGB (color) de 380x380 píxeles para mejor clasificación"
     )
     
     if uploaded_file is not None:
@@ -247,39 +231,49 @@ if model is not None:
                 st.markdown("---")
                 if "BlueRecyclable" in pred_class:
                     st.info("🔵 **Contenedor Azul - Reciclable**")
+                    st.write("Materiales como papel, cartón, vidrio, metales y plásticos")
                 elif "BrownCompost" in pred_class:
                     st.info("🟤 **Contenedor Marrón - Orgánico**")
+                    st.write("Restos de comida, frutas, verduras, poda del jardín")
                 elif "GrayTrash" in pred_class:
                     st.info("⚪ **Contenedor Gris - Resto**")
+                    st.write("Materiales no reciclables ni compostables")
                 elif "SPECIAL" in pred_class:
                     st.warning("🟡 **Categoría Especial**")
+                    st.write("Sigue las instrucciones específicas de tu municipio")
             else:
-                st.error(pred_class)
+                st.error(f"❌ {pred_class}")
 
 else:
-    st.error("""
-    ❌ **El sistema no está listo todavía**
+    st.error("❌ El modelo no se pudo cargar correctamente")
     
-    **Posibles soluciones:**
-    1. **Recarga la página** (F5 o Ctrl+R)
-    2. **Verifica el requirements.txt** en tu repositorio
-    3. **El modelo puede necesitar ser reentrenado** con una versión compatible
+    st.markdown("""
+    ### 🚨 Solución Definitiva:
     
-    **Para futuros entrenamientos en Colab:**
+    **Necesitas volver a Google Colab y guardar el modelo de forma compatible:**
+    
     ```python
-    # Al final de tu notebook, guarda el modelo así:
-    model.save('modelo.h5')  # Formato .h5 es más compatible
-    # O especifica la versión de TensorFlow
+    # OPCIÓN 1: Guardar como .h5 (más compatible)
+    model.save('EfficientNetB4_compatible.h5')
+    
+    # OPCIÓN 2: Guardar con formato específico
+    tf.keras.models.save_model(
+        model,
+        'EfficientNetB4_compatible.keras',
+        save_format='keras'
+    )
+    
+    # OPCIÓN 3: Instalar misma versión de TensorFlow en Colab
     !pip install tensorflow==2.13.0
+    # Luego entrenar y guardar el modelo
     ```
+    
+    **Luego:**
+    1. Sube el nuevo modelo a Google Drive
+    2. Actualiza el file_id en este código
+    3. Recarga la aplicación en Streamlit
     """)
-
-# Información de versión
-st.sidebar.markdown("---")
-st.sidebar.write("**Versiones:**")
-st.sidebar.write(f"TensorFlow: {tf.__version__}")
-st.sidebar.write(f"Streamlit: {st.__version__}")
 
 # Footer
 st.markdown("---")
-st.caption("Clasificador de Residuos usando EfficientNetB4 - Versión Streamlit")
+st.caption(f"TensorFlow {tf.__version__} | Streamlit {st.__version__}")
